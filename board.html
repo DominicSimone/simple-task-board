@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Simple Task Board</title>
+        <style>
+            /* General Body and Layout */
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    Helvetica, Arial, sans-serif;
+                background-color: #f4f4f4;
+                color: #333;
+                margin: 0;
+                padding: 15px;
+                overflow-x: hidden; /* Prevents horizontal scrollbar */
+            }
+
+            h2 {
+                margin-top: 0;
+                padding: 0 10px;
+                font-size: 16px;
+                color: #555;
+            }
+
+            /* Main container for the entire board */
+            .board-container {
+                display: flex;
+            }
+
+            /* Prep Area for creating/editing tasks */
+            .prep-area {
+                flex: 0 0 0; /* Default to zero width */
+                transition: flex-basis 0.3s ease-in-out, margin-right 0.3s ease-in-out;
+                overflow: hidden; /* Hide contents when collapsed */
+            }
+            
+            /* This class will be toggled by JavaScript to show the editor */
+            .prep-area.visible {
+                flex: 0 0 250px; /* Expand to this width when visible */
+                margin-right: 15px; /* Add a gap when visible */
+            }
+
+            /* Container for the main columns */
+            .columns-container {
+                flex: 1; /* Always take up the remaining space */
+                display: flex;
+                gap: 15px;
+                min-width: 0; /* Prevents columns from overflowing during transition */
+            }
+
+            /* Styling for each column */
+            .board-column {
+                flex: 1;
+                background-color: #e0e0e0;
+                border-radius: 8px;
+                padding: 10px;
+                min-height: 200px; /* Ensures columns are visible even when empty */
+            }
+
+            .task-list {
+                min-height: 100px; /* Drop zone height */
+                transition: background-color 0.2s ease;
+            }
+
+            /* Visual feedback when dragging over a column */
+            .drag-over {
+                background-color: #c8c8c8;
+            }
+
+            /* Task Card Styling */
+            .task {
+                display: flex;
+                background-color: #fff;
+                border-radius: 6px;
+                padding: 12px;
+                margin-bottom: 10px;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+                cursor: pointer;
+                transition:
+                    box-shadow 0.2s ease,
+                    transform 0.2s ease;
+                user-select: none; /* Prevents text selection during drag */
+            }
+
+            .task:hover {
+                box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+            }
+
+            .task.selected {
+                box-shadow: 0 0 0 2px #007bff;
+                transform: scale(1.02);
+            }
+
+            .task.dragging {
+                opacity: 0.5;
+            }
+
+            /* Label strip on the left of the task */
+            .task-labels {
+                flex: 0 0 10%; /* Takes up 10% of the task width */
+                min-width: 15px;
+                border-radius: 4px 0 0 4px;
+                margin-right: 12px;
+            }
+
+            .task-label {
+                flex: 1;
+                height: 20px; /* adjust the height as needed */
+            }
+
+            .task-content {
+                flex-grow: 1;
+            }
+
+            .task-title {
+                font-weight: bold;
+                margin: 0 0 5px 0;
+                word-wrap: break-word;
+            }
+
+            .task-description {
+                font-size: 14px;
+                color: #666;
+                max-height: 2.8em; /* Roughly 2 lines of text */
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: normal;
+                word-wrap: break-word;
+            }
+
+            /* When a task is selected, show the full description */
+            .task.selected .task-description {
+                max-height: none; /* Removes the height limit */
+                overflow: visible;
+                white-space: normal;
+            }
+
+            /* Task Editor Styling (in the Prep Area) */
+            .task-editor {
+                background-color: #fff;
+                border-radius: 6px;
+                padding: 12px;
+                box-shadow: 0 0 0 2px #007bff;
+                height: 100%; /* Ensure it fills the prep-area */
+            }
+            
+            .task-editor input,
+            .task-editor textarea {
+                width: 100%;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 8px;
+                margin-bottom: 10px;
+                box-sizing: border-box;
+            }
+            
+            .task-editor input:focus,
+            .task-editor textarea:focus {
+                outline: none;
+                border-color: #007bff;
+            }
+
+            .label-selector {
+                display: flex;
+                gap: 5px;
+                margin-bottom: 10px;
+            }
+
+            .label-color {
+                width: 20px;
+                height: 20px;
+                border-radius: 4px;
+                border: 2px solid transparent;
+                cursor: pointer;
+            }
+
+            .label-color.selected {
+                border-color: #333;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="board-container">
+            <div class="prep-area" id="prep-area"></div>
+
+            <div class="columns-container">
+                <div class="board-column" id="todo-col">
+                    <h2>To do</h2>
+                    <div class="task-list" id="todo-list"></div>
+                </div>
+                <div class="board-column" id="inprogress-col">
+                    <h2>In progress</h2>
+                    <div class="task-list" id="inprogress-list"></div>
+                </div>
+                <div class="board-column" id="complete-col">
+                    <h2>Complete</h2>
+                    <div class="task-list" id="complete-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            document.addEventListener("DOMContentLoaded", () => {
+                // --- STATE MANAGEMENT ---
+                let state = "DEFAULT"; // DEFAULT, TASK_SELECTED, EDIT_TASK, EDIT_TASK_TEXT
+                let selectedTask = null; // Holds the currently selected task element
+                let editingTask = null; // Holds the task data while in the editor
+                let originalColumnId = null; // Remembers where a task came from
+
+                // --- DOM ELEMENTS ---
+                const prepArea = document.getElementById("prep-area");
+                const columns = document.querySelectorAll(".board-column");
+                const taskLists = document.querySelectorAll(".task-list");
+
+                // --- CONSTANTS ---
+                const LABEL_COLORS = {
+                    1: "#dc3545", // Red
+                    2: "#fd7e14", // Orange
+                    3: "#ffc107", // Yellow
+                    4: "#28a745", // Green
+                    5: "#007bff", // Blue
+                    6: "#4B0082", // Indigo
+                    7: "#EE82EE", // Violet
+                    8: "#6c757d", // Gray
+                    9: "#A52A2A", // Brown
+                };
+
+                // --- EVENT LISTENERS ---
+
+                // Global Keyboard Handler
+                document.addEventListener("keydown", handleGlobalKeys);
+
+                // Global Click Handler (for deselecting tasks)
+                document.addEventListener("click", (e) => {
+                    if (state === "TASK_SELECTED") {
+                        // If the click is outside of the selected task, deselect it
+                        if (selectedTask && !selectedTask.contains(e.target)) {
+                            unselectTask();
+                        }
+                    }
+                });
+
+                // Drag and Drop Handlers for task lists
+                taskLists.forEach((list) => {
+                    list.addEventListener("dragover", handleDragOver);
+                    list.addEventListener("dragleave", handleDragLeave);
+                    list.addEventListener("drop", handleDrop);
+                });
+
+                // --- CORE FUNCTIONS ---
+
+                /**
+                 * Handles global key presses and routes them based on the current state.
+                 */
+                function handleGlobalKeys(e) {
+                    switch (state) {
+                        case "DEFAULT":
+                            if (e.key.toLowerCase() === "t") {
+                                e.preventDefault();
+                                startNewTask();
+                            } else if (e.key === " ") {
+                                e.preventDefault();
+                                startNewTask();
+                            }
+                            break;
+                        case "TASK_SELECTED":
+                            if (e.key.toLowerCase() === "t") {
+                                e.preventDefault();
+                                editSelectedTask();
+                            } else if (e.key === "Escape") {
+                                unselectTask();
+                            }
+                            break;
+                        case "EDIT_TASK":
+                            if (e.key.toLowerCase() === "t") {
+                                e.preventDefault();
+                                focusEditorField("title");
+                            } else if (e.key.toLowerCase() === "d") {
+                                e.preventDefault();
+                                focusEditorField("description");
+                            } else if (LABEL_COLORS[e.key]) {
+                                e.preventDefault();
+                                toggleLabelInEditor(e.key);
+                            } else if (e.key === "Enter") {
+                                e.preventDefault();
+                                saveTaskFromEditor();
+                            }
+                            break;
+                        case "EDIT_TASK_TEXT":
+                            if (e.key === "Enter") {
+                                e.preventDefault();
+                                // The blur event on the input/textarea handles saving
+                                e.target.blur();
+                            }
+                            break;
+                    }
+                }
+
+                /**
+                 * Creates a new, blank task in the prep area.
+                 */
+                function startNewTask() {
+                    unselectTask(); // Ensure nothing is selected
+                    editingTask = {
+                        id: `task-${Date.now()}`,
+                        title: "New Task",
+                        description: "",
+                        labels: [],
+                        status: "todo-list",
+                    };
+                    originalColumnId = "todo-list"; // New tasks default to 'To do'
+                    renderEditor();
+                    prepArea.classList.add('visible');
+                    setState("EDIT_TASK");
+                }
+
+                /**
+                 * Renders the task editor in the prep area based on the `editingTask` object.
+                 */
+                function renderEditor() {
+                    let labelHtml = Object.entries(LABEL_COLORS)
+                        .map(([key, color]) => {
+                            const isSelected = editingTask.labels.includes(key);
+                            return `<div class="label-color ${isSelected ? "selected" : ""}" style="background-color: ${color};" data-key="${key}"></div>`;
+                        })
+                        .join("");
+
+                    prepArea.innerHTML = `
+                    <div class="task-editor" id="task-editor">
+                        <input type="text" id="editor-title" value="${editingTask.title}">
+                        <textarea id="editor-description" rows="4" placeholder="Description...">${editingTask.description}</textarea>
+                        <div class="label-selector">${labelHtml}</div>
+                    </div>
+                `;
+
+                    // Add event listeners for the new editor elements
+                    document
+                        .getElementById("editor-title")
+                        .addEventListener("focus", () =>
+                            setState("EDIT_TASK_TEXT"),
+                        );
+                    document
+                        .getElementById("editor-title")
+                        .addEventListener("blur", () => {
+                            editingTask.title =
+                                document.getElementById("editor-title").value;
+                            setState("EDIT_TASK");
+                        });
+
+                    document
+                        .getElementById("editor-description")
+                        .addEventListener("focus", () =>
+                            setState("EDIT_TASK_TEXT"),
+                        );
+                    document
+                        .getElementById("editor-description")
+                        .addEventListener("blur", () => {
+                            editingTask.description =
+                                document.getElementById(
+                                    "editor-description",
+                                ).value;
+                            setState("EDIT_TASK");
+                        });
+
+                    document
+                        .querySelectorAll(".label-color")
+                        .forEach((label) => {
+                            label.addEventListener("click", () =>
+                                toggleLabelInEditor(label.dataset.key),
+                            );
+                        });
+                }
+
+                /**
+                 * Puts focus into the title or description field in the editor.
+                 */
+                function focusEditorField(fieldName) {
+                    const field = document.getElementById(
+                        fieldName === "title"
+                            ? "editor-title"
+                            : "editor-description",
+                    );
+                    if (field) {
+                        field.focus();
+                        field.select();
+                    }
+                }
+
+                /**
+                 * Toggles a label on or off in the editor view.
+                 */
+                function toggleLabelInEditor(key) {
+                    const labelIndex = editingTask.labels.indexOf(key);
+                    if (labelIndex > -1) {
+                        editingTask.labels.splice(labelIndex, 1); // Remove if exists
+                    } else {
+                        editingTask.labels.push(key); // Add if not
+                    }
+                    renderEditor(); // Re-render to show visual change
+                    setState("EDIT_TASK"); // Stay in edit task mode
+                }
+
+                /**
+                 * Saves the task from the editor and places it in the correct column.
+                 */
+                function saveTaskFromEditor() {
+                    // Get final values from fields just in case they weren't blurred
+                    editingTask.title =
+                        document.getElementById("editor-title").value;
+                    editingTask.description =
+                        document.getElementById("editor-description").value;
+
+                    // Remove the old task element if it exists
+                    const existingElement = document.getElementById(
+                        editingTask.id,
+                    );
+                    if (existingElement) {
+                        existingElement.remove();
+                    }
+
+                    // Create and append the new/updated task element
+                    const targetColumn =
+                        document.getElementById(originalColumnId);
+                    const taskElement = createTaskElement(editingTask);
+                    targetColumn.appendChild(taskElement);
+
+                    // Cleanup
+                    prepArea.classList.remove('visible');
+                    prepArea.innerHTML = "";
+                    editingTask = null;
+                    originalColumnId = null;
+                    setState("DEFAULT");
+                }
+
+                /**
+                 * Creates a DOM element for a task object.
+                 */
+                function createTaskElement(taskData) {
+                    const task = document.createElement("div");
+                    task.className = "task";
+                    task.id = taskData.id;
+                    task.draggable = true;
+
+                    // Create label gradient
+                    const labelElements = taskData.labels.map(
+                        (label, index) => {
+                            return `<div class="task-label" style="background: ${LABEL_COLORS[label]}"></div>`;
+                        },
+                    );
+
+                    const labelContainer =
+                        taskData.labels.length > 0
+                            ? `<div class="task-labels">${labelElements.join("")}</div>`
+                            : `<div class="task-labels" style="background: #e0e0e0;"></div>`;
+
+                    task.innerHTML = `
+                  ${labelContainer}
+                  <div class="task-content">
+                    <div class="task-title">${taskData.title}</div>
+                    <div class="task-description">${taskData.description}</div>
+                  </div>
+                `;
+
+                    // --- Add event listeners for the new task ---
+                    task.addEventListener("click", (e) => {
+                        // Prevent click from firing during drag
+                        if (e.defaultPrevented) return;
+                        e.stopPropagation(); // Stop click from bubbling to the document
+                        selectTask(task);
+                    });
+                    
+                    task.addEventListener("dblclick", () => {
+                        selectAndEditTask(task);
+                    });
+
+                    task.addEventListener("dragstart", handleDragStart);
+                    task.addEventListener('dragend', handleDragEnd);
+
+                    // Store data on the element for later retrieval
+                    task.dataset.taskData = JSON.stringify(taskData);
+
+                    return task;
+                }
+
+                /**
+                 * Sets the application state to TASK_SELECTED for a given task.
+                 */
+                function selectTask(taskElement) {
+                    // If another task is already selected, unselect it first
+                    if (selectedTask && selectedTask !== taskElement) {
+                        unselectTask();
+                    }
+
+                    selectedTask = taskElement;
+                    selectedTask.classList.add("selected");
+                    setState("TASK_SELECTED");
+                }
+                
+                function selectAndEditTask(taskElement) {
+                    selectTask(taskElement);
+                    editSelectedTask();
+                }
+
+                /**
+                 * Unselects any currently selected task.
+                 */
+                function unselectTask() {
+                    if (selectedTask) {
+                        selectedTask.classList.remove("selected");
+                    }
+                    selectedTask = null;
+                    setState("DEFAULT");
+                }
+
+                /**
+                 * Moves the currently selected task to the prep area for editing.
+                 */
+                function editSelectedTask() {
+                    if (!selectedTask) return;
+
+                    // Get task data from the element
+                    editingTask = JSON.parse(selectedTask.dataset.taskData);
+                    originalColumnId = selectedTask.parentElement.id; // Remember its column
+
+                    renderEditor();
+
+                    // Remove the task from the board temporarily
+                    selectedTask.remove();
+                    selectedTask = null;
+                    prepArea.classList.add('visible');
+
+                    setState("EDIT_TASK");
+                }
+
+                // --- DRAG AND DROP HANDLERS ---
+
+                function handleDragStart(e) {
+                    // console.log("handle drag start");
+                    e.dataTransfer.setData("text/plain", e.target.id);
+                    e.target.classList.add("dragging");
+                }
+
+                function handleDragEnd(e) {
+                    // This event fires after drop or if the drag is cancelled.
+                    // It's the perfect place to remove the 'dragging' class.
+                    e.target.classList.remove("dragging");
+                }
+
+                function handleDragOver(e) {
+                    // console.log("handle drag over");
+                    e.preventDefault(); // Necessary to allow dropping
+                    this.classList.add("drag-over");
+                }
+
+                function handleDragLeave(e) {
+                    // console.log("handle drag leave");
+                    this.classList.remove("drag-over");
+                }
+
+                function handleDrop(e) {
+                    // console.log("handle drop");
+                    e.preventDefault();
+                    const id = e.dataTransfer.getData("text/plain");
+                    const draggableElement = document.getElementById(id);
+                    const dropzone = e.target.closest(".task-list");
+
+                    if (dropzone && draggableElement) {
+                        dropzone.appendChild(draggableElement);
+                        draggableElement.classList.remove("dragging");
+
+                        // Update the task's status data
+                        const taskData = JSON.parse(
+                            draggableElement.dataset.taskData,
+                        );
+                        taskData.status = dropzone.id;
+                        draggableElement.dataset.taskData =
+                            JSON.stringify(taskData);
+                    }
+
+                    // Clean up visual cues
+                    document
+                        .querySelectorAll(".drag-over")
+                        .forEach((el) => el.classList.remove("drag-over"));
+                }
+
+                /**
+                 * Helper to set the global state and log it for debugging.
+                 */
+                function setState(newState) {
+                    state = newState;
+                    // console.log("State changed to:", state); // Uncomment for debugging
+                }
+            });
+        </script>
+    </body>
+</html>
