@@ -257,16 +257,13 @@
                 function handleGlobalKeys(e) {
                     switch (state) {
                         case "DEFAULT":
-                            if (e.key.toLowerCase() === "t") {
-                                e.preventDefault();
-                                startNewTask();
-                            } else if (e.key === " ") {
+                            if (e.key.toLowerCase() === "t" || e.key === " ") {
                                 e.preventDefault();
                                 startNewTask();
                             }
                             break;
                         case "TASK_SELECTED":
-                            if (e.key.toLowerCase() === "t") {
+                            if (e.key.toLowerCase() === "t" || e.key === " ") {
                                 e.preventDefault();
                                 editSelectedTask();
                             } else if (e.key === "Escape") {
@@ -274,7 +271,7 @@
                             }
                             break;
                         case "EDIT_TASK":
-                            if (e.key.toLowerCase() === "t") {
+                            if (e.key.toLowerCase() === "t" || e.key === " ") {
                                 e.preventDefault();
                                 focusEditorField("title");
                             } else if (e.key.toLowerCase() === "d") {
